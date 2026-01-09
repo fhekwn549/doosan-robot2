@@ -167,6 +167,11 @@
 #include "dsr_msgs2/srv/drl_resume.hpp"
 #include "dsr_msgs2/srv/get_drl_state.hpp"
 
+//gripper (flange serial)
+#include "dsr_msgs2/srv/flange_serial_open.hpp"
+#include "dsr_msgs2/srv/flange_serial_close.hpp"
+#include "dsr_msgs2/srv/flange_serial_write.hpp"
+#include "dsr_msgs2/srv/flange_serial_read.hpp"
 
 //tcp
 #include "dsr_msgs2/srv/config_create_tcp.hpp"
@@ -698,12 +703,18 @@ protected:
   rclcpp::Service<dsr_msgs2::srv::ConfigCreateModbus>::SharedPtr           m_nh_srv_config_create_modbus; 
   rclcpp::Service<dsr_msgs2::srv::ConfigDeleteModbus>::SharedPtr           m_nh_srv_config_delete_modbus; 
 
-  //----- DRL        
-  rclcpp::Service<dsr_msgs2::srv::DrlPause>::SharedPtr                     m_nh_srv_drl_pause; 
-  rclcpp::Service<dsr_msgs2::srv::DrlStart>::SharedPtr                     m_nh_srv_drl_start; 
-  rclcpp::Service<dsr_msgs2::srv::DrlStop>::SharedPtr                      m_nh_srv_drl_stop; 
-  rclcpp::Service<dsr_msgs2::srv::DrlResume>::SharedPtr                    m_nh_srv_drl_resume; 
-  rclcpp::Service<dsr_msgs2::srv::GetDrlState>::SharedPtr                  m_nh_srv_get_drl_state; 
+  //----- DRL
+  rclcpp::Service<dsr_msgs2::srv::DrlPause>::SharedPtr                     m_nh_srv_drl_pause;
+  rclcpp::Service<dsr_msgs2::srv::DrlStart>::SharedPtr                     m_nh_srv_drl_start;
+  rclcpp::Service<dsr_msgs2::srv::DrlStop>::SharedPtr                      m_nh_srv_drl_stop;
+  rclcpp::Service<dsr_msgs2::srv::DrlResume>::SharedPtr                    m_nh_srv_drl_resume;
+  rclcpp::Service<dsr_msgs2::srv::GetDrlState>::SharedPtr                  m_nh_srv_get_drl_state;
+
+  //----- GRIPPER (Flange Serial)
+  rclcpp::Service<dsr_msgs2::srv::FlangeSerialOpen>::SharedPtr             m_nh_srv_flange_serial_open;
+  rclcpp::Service<dsr_msgs2::srv::FlangeSerialClose>::SharedPtr            m_nh_srv_flange_serial_close;
+  rclcpp::Service<dsr_msgs2::srv::FlangeSerialWrite>::SharedPtr            m_nh_srv_flange_serial_write;
+  rclcpp::Service<dsr_msgs2::srv::FlangeSerialRead>::SharedPtr             m_nh_srv_flange_serial_read;
 
   //----- RT
   rclcpp::Service<dsr_msgs2::srv::ConnectRtControl>::SharedPtr              m_nh_connect_rt_control;

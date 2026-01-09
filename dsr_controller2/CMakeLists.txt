@@ -115,6 +115,12 @@ install(
   LIBRARY DESTINATION lib
 )
 
+install(PROGRAMS
+  scripts/gripper_control.py
+  scripts/gripper.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_export_targets(export_dsr_controller2 HAS_LIBRARY_TARGET)
 ament_export_targets(export_dsr_joint_trajectory HAS_LIBRARY_TARGET)
 ament_export_dependencies(${THIS_PACKAGE_INCLUDE_DEPENDS})

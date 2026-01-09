@@ -160,7 +160,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/gripper/Robotiq2FOpen.srv"
   "srv/gripper/Robotiq2FMove.srv"
   "srv/gripper/SerialSendData.srv"
-  
+  "srv/gripper/FlangeSerialOpen.srv"
+  "srv/gripper/FlangeSerialClose.srv"
+  "srv/gripper/FlangeSerialWrite.srv"
+  "srv/gripper/FlangeSerialRead.srv"
+
 
   "srv/realtime/ConnectRtControl.srv"
   "srv/realtime/DisconnectRtControl.srv"

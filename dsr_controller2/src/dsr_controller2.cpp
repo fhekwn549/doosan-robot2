@@ -1887,16 +1887,91 @@ auto drl_resume_cb = [this](const std::shared_ptr<dsr_msgs2::srv::DrlResume::Req
         res->success = Drfl->drl_resume();
 };
 
-auto get_drl_state_cb = [this](const std::shared_ptr<dsr_msgs2::srv::GetDrlState::Request> /*req*/, std::shared_ptr<dsr_msgs2::srv::GetDrlState::Response> res) -> void      
+auto get_drl_state_cb = [this](const std::shared_ptr<dsr_msgs2::srv::GetDrlState::Request> /*req*/, std::shared_ptr<dsr_msgs2::srv::GetDrlState::Response> res) -> void
 {
     res->success = false;
 
     if(g_bIsEmulatorMode)
         RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"The drl service cannot be used in emulator mode (available in real mode).");
-    else{ 
+    else{
         res->drl_state = Drfl->get_program_state();
         res->success = true;
-    }    
+    }
+};
+
+
+//----- GRIPPER (Flange Serial) Service Call-back functions -----------------------------------------
+auto flange_serial_open_cb = [this](const std::shared_ptr<dsr_msgs2::srv::FlangeSerialOpen::Request> req, std::shared_ptr<dsr_msgs2::srv::FlangeSerialOpen::Response> res) -> void
+{
+    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"flange_serial_open_cb() called - port:%d, baudrate:%d", req->port, req->baudrate);
+    res->success = false;
+
+    if(g_bIsEmulatorMode) {
+        RCLCPP_WARN(rclcpp::get_logger("dsr_controller2"),"flange_serial_open is not available in emulator mode.");
+    } else {
+        int baudrate = (req->baudrate > 0) ? req->baudrate : 115200;
+        BYTE_SIZE bytesize = (req->bytesize == 5) ? BYTE_SIZE_FIVEBITES :
+                             (req->bytesize == 6) ? BYTE_SIZE_SIXBITS :
+                             (req->bytesize == 7) ? BYTE_SIZE_SEVENBITS : BYTE_SIZE_EIGHTBITS;
+        PARITY_CHECK parity = (req->parity == 1) ? PARITY_CHECK_ODD :
+                              (req->parity == 2) ? PARITY_CHECK_EVEN : PARITY_CHECK_NONE;
+        STOP_BITS stopbits = (req->stopbits == 2) ? STOPBITS_TWO : STOPBITS_ONE;
+
+        res->success = Drfl->flange_serial_open(req->port, baudrate, bytesize, parity, stopbits);
+    }
+};
+
+auto flange_serial_close_cb = [this](const std::shared_ptr<dsr_msgs2::srv::FlangeSerialClose::Request> req, std::shared_ptr<dsr_msgs2::srv::FlangeSerialClose::Response> res) -> void
+{
+    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"flange_serial_close_cb() called - port:%d", req->port);
+    res->success = false;
+
+    if(g_bIsEmulatorMode) {
+        RCLCPP_WARN(rclcpp::get_logger("dsr_controller2"),"flange_serial_close is not available in emulator mode.");
+    } else {
+        res->success = Drfl->flange_serial_close(req->port);
+    }
+};
+
+auto flange_serial_write_cb = [this](const std::shared_ptr<dsr_msgs2::srv::FlangeSerialWrite::Request> req, std::shared_ptr<dsr_msgs2::srv::FlangeSerialWrite::Response> res) -> void
+{
+    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"flange_serial_write_cb() called - port:%d, size:%zu", req->port, req->data.size());
+    res->success = false;
+
+    if(g_bIsEmulatorMode) {
+        RCLCPP_WARN(rclcpp::get_logger("dsr_controller2"),"flange_serial_write is not available in emulator mode.");
+    } else {
+        int port = (req->port > 0) ? req->port : 1;
+        int size = req->data.size();
+        char* send_data = new char[size];
+        for(int i = 0; i < size; i++) {
+            send_data[i] = static_cast<char>(req->data[i]);
+        }
+        res->success = Drfl->flange_serial_write(size, send_data, port);
+        delete[] send_data;
+    }
+};
+
+auto flange_serial_read_cb = [this](const std::shared_ptr<dsr_msgs2::srv::FlangeSerialRead::Request> req, std::shared_ptr<dsr_msgs2::srv::FlangeSerialRead::Response> res) -> void
+{
+    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"flange_serial_read_cb() called - port:%d, timeout:%.2f", req->port, req->timeout);
+    res->success = false;
+    res->size = 0;
+
+    if(g_bIsEmulatorMode) {
+        RCLCPP_WARN(rclcpp::get_logger("dsr_controller2"),"flange_serial_read is not available in emulator mode.");
+    } else {
+        int port = (req->port > 0) ? req->port : 1;
+        LPFLANGE_SER_RXD_INFO_EX rxd_info = Drfl->flange_serial_read(req->timeout, port);
+        if(rxd_info != nullptr && rxd_info->_iSize > 0) {
+            res->size = rxd_info->_iSize;
+            res->data.resize(rxd_info->_iSize);
+            for(int i = 0; i < rxd_info->_iSize; i++) {
+                res->data[i] = static_cast<uint8_t>(rxd_info->_cRxd[i]);
+            }
+            res->success = true;
+        }
+    }
 };
 
 
@@ -2432,11 +2507,17 @@ auto torque_rt_cb = [this](const std::shared_ptr<dsr_msgs2::msg::TorqueRtStream>
   m_nh_srv_set_tool_shape         = get_node()->create_service<dsr_msgs2::srv::SetToolShape>("tool/set_tool_shape", set_tool_shape_cb); 
 
   //  DRL
-  m_nh_srv_drl_pause              = get_node()->create_service<dsr_msgs2::srv::DrlPause>("drl/drl_pause", drl_pause_cb);                         
-  m_nh_srv_drl_start              = get_node()->create_service<dsr_msgs2::srv::DrlStart>("drl/drl_start", drl_start_cb);    
-  m_nh_srv_drl_stop               = get_node()->create_service<dsr_msgs2::srv::DrlStop>("drl/drl_stop", drl_stop_cb);    
-  m_nh_srv_drl_resume             = get_node()->create_service<dsr_msgs2::srv::DrlResume>("drl/drl_resume", drl_resume_cb);        
-  m_nh_srv_get_drl_state          = get_node()->create_service<dsr_msgs2::srv::GetDrlState>("drl/get_drl_state", get_drl_state_cb);       
+  m_nh_srv_drl_pause              = get_node()->create_service<dsr_msgs2::srv::DrlPause>("drl/drl_pause", drl_pause_cb);
+  m_nh_srv_drl_start              = get_node()->create_service<dsr_msgs2::srv::DrlStart>("drl/drl_start", drl_start_cb);
+  m_nh_srv_drl_stop               = get_node()->create_service<dsr_msgs2::srv::DrlStop>("drl/drl_stop", drl_stop_cb);
+  m_nh_srv_drl_resume             = get_node()->create_service<dsr_msgs2::srv::DrlResume>("drl/drl_resume", drl_resume_cb);
+  m_nh_srv_get_drl_state          = get_node()->create_service<dsr_msgs2::srv::GetDrlState>("drl/get_drl_state", get_drl_state_cb);
+
+  //  Gripper (Flange Serial)
+  m_nh_srv_flange_serial_open     = get_node()->create_service<dsr_msgs2::srv::FlangeSerialOpen>("gripper/flange_serial_open", flange_serial_open_cb);
+  m_nh_srv_flange_serial_close    = get_node()->create_service<dsr_msgs2::srv::FlangeSerialClose>("gripper/flange_serial_close", flange_serial_close_cb);
+  m_nh_srv_flange_serial_write    = get_node()->create_service<dsr_msgs2::srv::FlangeSerialWrite>("gripper/flange_serial_write", flange_serial_write_cb);
+  m_nh_srv_flange_serial_read     = get_node()->create_service<dsr_msgs2::srv::FlangeSerialRead>("gripper/flange_serial_read", flange_serial_read_cb);
 
   // RT
   m_nh_connect_rt_control = get_node()->create_service<dsr_msgs2::srv::ConnectRtControl>("realtime/connect_rt_control", connect_rt_control_cb);

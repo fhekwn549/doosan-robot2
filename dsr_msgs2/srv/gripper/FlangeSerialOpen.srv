@@ -1,0 +1,7 @@
+int32 port
+int32 baudrate
+int32 bytesize
+int32 parity
+int32 stopbits
+---
+bool success
