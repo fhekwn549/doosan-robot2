@@ -2859,6 +2859,18 @@ controller_interface::return_type RobotController::update(
 
 controller_interface::CallbackReturn RobotController::on_deactivate(const rclcpp_lifecycle::State &)
 {
+  RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"), "on_deactivate: releasing interfaces and cancelling timers");
+
+  // Cancel timers to stop periodic callbacks from firing
+  if (rt_timer_) {
+    rt_timer_->cancel();
+    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"), "RT timer cancelled");
+  }
+  if (ctrl_io_timer_) {
+    ctrl_io_timer_->cancel();
+    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"), "IO timer cancelled");
+  }
+
   release_interfaces();
 
   return CallbackReturn::SUCCESS;
@@ -2866,18 +2878,231 @@ controller_interface::CallbackReturn RobotController::on_deactivate(const rclcpp
 
 controller_interface::CallbackReturn RobotController::on_cleanup(const rclcpp_lifecycle::State &)
 {
-    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"on deactivate");
+  RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"), "on_cleanup: resetting timers, publishers, subscriptions, and services");
+
+  // Reset timers
+  rt_timer_.reset();
+  ctrl_io_timer_.reset();
+
+  // Reset RT publishers
+  rt_pub_map_.clear();
+  ctrl_io_pub_.reset();
+
+  // Reset disconnect/error publishers
+  disconnect_pub_.reset();
+  error_log_pub_.reset();
+
+  // Reset stream subscriptions
+  m_sub_alter_motion_stream.reset();
+  m_sub_servoj_stream.reset();
+  m_sub_servol_stream.reset();
+  m_sub_speedj_stream.reset();
+  m_sub_speedl_stream.reset();
+  m_sub_servoj_rt_stream.reset();
+  m_sub_servol_rt_stream.reset();
+  m_sub_speedj_rt_stream.reset();
+  m_sub_speedl_rt_stream.reset();
+  m_sub_torque_rt_stream.reset();
+
+  // Reset all service servers (system)
+  m_nh_srv_get_robot_mode.reset();
+  m_nh_srv_set_robot_mode.reset();
+  m_nh_srv_set_robot_system.reset();
+  m_nh_srv_get_robot_system.reset();
+  m_nh_srv_get_robot_state.reset();
+  m_nh_srv_set_robot_speed_mode.reset();
+  m_nh_srv_get_robot_speed_mode.reset();
+  m_nh_srv_get_current_pose.reset();
+  m_nh_srv_set_safe_stop_reset_type.reset();
+  m_nh_srv_get_last_alarm.reset();
+  m_nh_srv_servo_off.reset();
+  m_nh_srv_set_robot_control.reset();
+  m_nh_srv_change_collision_sensitivity.reset();
+  m_nh_srv_set_safety_mode.reset();
+
+  // Reset motion services
+  m_nh_srv_move_joint.reset();
+  m_nh_srv_move_line.reset();
+  m_nh_srv_move_jointx.reset();
+  m_nh_srv_move_circle.reset();
+  m_nh_srv_move_spline_joint.reset();
+  m_nh_srv_move_spline_task.reset();
+  m_nh_srv_move_blending.reset();
+  m_nh_srv_move_spiral.reset();
+  m_nh_srv_move_periodic.reset();
+  m_nh_srv_move_wait.reset();
+  m_nh_srv_jog.reset();
+  m_nh_srv_jog_multi.reset();
+  m_nh_srv_move_stop.reset();
+  m_nh_srv_move_resume.reset();
+  m_nh_srv_move_pause.reset();
+  m_nh_srv_trans.reset();
+  m_nh_srv_fkin.reset();
+  m_nh_srv_ikin.reset();
+  m_nh_srv_set_ref_coord.reset();
+  m_nh_srv_move_home.reset();
+  m_nh_srv_check_motion.reset();
+  m_nh_srv_change_operation_speed.reset();
+  m_nh_srv_enable_alter_motion.reset();
+  m_nh_srv_alter_motion.reset();
+  m_nh_srv_disable_alter_motion.reset();
+  m_nh_srv_set_singularity_handling.reset();
+  m_nh_srv_set_singular_handling_force.reset();
+
+  // Reset aux_control services
+  m_nh_srv_get_control_mode.reset();
+  m_nh_srv_get_control_space.reset();
+  m_nh_srv_get_current_posj.reset();
+  m_nh_srv_get_current_velj.reset();
+  m_nh_srv_get_desired_posj.reset();
+  m_nh_srv_get_desired_velj.reset();
+  m_nh_srv_get_current_posx.reset();
+  m_nh_srv_get_current_velx.reset();
+  m_nh_srv_get_desired_posx.reset();
+  m_nh_srv_get_desired_velx.reset();
+  m_nh_srv_get_current_tool_flange_posx.reset();
+  m_nh_srv_get_current_solution_space.reset();
+  m_nh_srv_get_current_rotm.reset();
+  m_nh_srv_get_joint_torque.reset();
+  m_nh_srv_get_external_torque.reset();
+  m_nh_srv_get_tool_force.reset();
+  m_nh_srv_get_solution_space.reset();
+  m_nh_srv_get_orientation_error.reset();
+  m_nh_srv_get_robot_link_info.reset();
+
+  // Reset force/stiffness services
+  m_nh_srv_parallel_axis1.reset();
+  m_nh_srv_parallel_axis2.reset();
+  m_nh_srv_align_axis1.reset();
+  m_nh_srv_align_axis2.reset();
+  m_nh_srv_is_done_bolt_tightening.reset();
+  m_nh_srv_release_compliance_ctrl.reset();
+  m_nh_srv_task_compliance_ctrl.reset();
+  m_nh_srv_set_stiffnessx.reset();
+  m_nh_srv_calc_coord.reset();
+  m_nh_srv_set_user_cart_coord1.reset();
+  m_nh_srv_set_user_cart_coord2.reset();
+  m_nh_srv_set_user_cart_coord3.reset();
+  m_nh_srv_overwrite_user_cart_coord.reset();
+  m_nh_srv_get_user_cart_coord.reset();
+  m_nh_srv_set_desired_force.reset();
+  m_nh_srv_release_force.reset();
+  m_nh_srv_check_position_condition.reset();
+  m_nh_srv_check_force_condition.reset();
+  m_nh_srv_check_orientation_condition1.reset();
+  m_nh_srv_check_orientation_condition2.reset();
+  m_nh_srv_coord_transform.reset();
+  m_nh_srv_get_workpiece_weight.reset();
+  m_nh_srv_reset_workpiece_weight.reset();
+
+  // Reset TCP/Tool services
+  m_nh_srv_set_current_tcp.reset();
+  m_nh_srv_get_current_tcp.reset();
+  m_nh_srv_config_create_tcp.reset();
+  m_nh_srv_config_delete_tcp.reset();
+  m_nh_srv_set_current_tool.reset();
+  m_nh_srv_get_current_tool.reset();
+  m_nh_srv_config_create_tool.reset();
+  m_nh_srv_config_delete_tool.reset();
+  m_nh_srv_set_tool_shape.reset();
+
+  // Reset IO services
+  m_nh_srv_set_ctrl_box_digital_output.reset();
+  m_nh_srv_get_ctrl_box_digital_output.reset();
+  m_nh_srv_get_ctrl_box_digital_input.reset();
+  m_nh_srv_set_tool_digital_output.reset();
+  m_nh_srv_get_tool_digital_output.reset();
+  m_nh_srv_get_tool_digital_input.reset();
+  m_nh_srv_set_ctrl_box_analog_output.reset();
+  m_nh_srv_get_ctrl_box_analog_input.reset();
+  m_nh_srv_set_ctrl_box_analog_output_type.reset();
+  m_nh_srv_set_ctrl_box_analog_input_type.reset();
+
+  // Reset Modbus services
+  m_nh_srv_set_modbus_output.reset();
+  m_nh_srv_get_modbus_input.reset();
+  m_nh_srv_config_create_modbus.reset();
+  m_nh_srv_config_delete_modbus.reset();
+
+  // Reset DRL services
+  m_nh_srv_drl_pause.reset();
+  m_nh_srv_drl_start.reset();
+  m_nh_srv_drl_stop.reset();
+  m_nh_srv_drl_resume.reset();
+  m_nh_srv_get_drl_state.reset();
+
+  // Reset Gripper (Flange Serial) services
+  m_nh_srv_flange_serial_open.reset();
+  m_nh_srv_flange_serial_close.reset();
+  m_nh_srv_flange_serial_write.reset();
+  m_nh_srv_flange_serial_read.reset();
+
+  // Reset RT services
+  m_nh_connect_rt_control.reset();
+  m_nh_disconnect_rt_control.reset();
+  m_nh_get_rt_control_output_version_list.reset();
+  m_nh_get_rt_control_input_version_list.reset();
+  m_nh_get_rt_control_input_data_list.reset();
+  m_nh_get_rt_control_output_data_list.reset();
+  m_nh_set_rt_control_input.reset();
+  m_nh_set_rt_control_output.reset();
+  m_nh_start_rt_control.reset();
+  m_nh_stop_rt_control.reset();
+  m_nh_set_velj_rt.reset();
+  m_nh_set_accj_rt.reset();
+  m_nh_set_velx_rt.reset();
+  m_nh_set_accx_rt.reset();
+  m_nh_read_data_rt.reset();
+  m_nh_write_data_rt.reset();
+
+  // Reset Action servers
+  m_nh_srv_jog_h2r.reset();
+  m_nh_srv_movej_h2r.reset();
+  m_nh_srv_movel_h2r.reset();
+
+  // Reset PLC services
+  m_nh_srv_get_input_register_int.reset();
+  m_nh_srv_get_input_register_bit.reset();
+  m_nh_srv_get_input_register_float.reset();
+  m_nh_srv_set_output_register_int.reset();
+  m_nh_srv_set_output_register_bit.reset();
+  m_nh_srv_set_output_register_float.reset();
+  m_nh_srv_get_output_register_int.reset();
+  m_nh_srv_get_output_register_bit.reset();
+  m_nh_srv_get_output_register_float.reset();
+
+  RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"), "on_cleanup: all resources released");
   return CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn RobotController::on_error(const rclcpp_lifecycle::State &)
 {
+  RCLCPP_ERROR(rclcpp::get_logger("dsr_controller2"), "on_error: controller entered error state");
+
+  // Cancel timers to prevent further callbacks
+  if (rt_timer_) rt_timer_->cancel();
+  if (ctrl_io_timer_) ctrl_io_timer_->cancel();
+
   return CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn RobotController::on_shutdown(const rclcpp_lifecycle::State &)
 {
-    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"on deactivate");
+  RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"), "on_shutdown: cleaning up controller");
+
+  // Cancel timers
+  if (rt_timer_) rt_timer_->cancel();
+  if (ctrl_io_timer_) ctrl_io_timer_->cancel();
+
+  // Reset timers and publishers
+  rt_timer_.reset();
+  ctrl_io_timer_.reset();
+  rt_pub_map_.clear();
+  ctrl_io_pub_.reset();
+  disconnect_pub_.reset();
+  error_log_pub_.reset();
+
+  RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"), "on_shutdown: controller shutdown complete");
   return CallbackReturn::SUCCESS;
 }
 

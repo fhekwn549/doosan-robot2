@@ -529,6 +529,35 @@ return_type DRHWInterface::write(const rclcpp::Time &, const rclcpp::Duration &d
 }
 
 
+CallbackReturn DRHWInterface::on_deactivate(const rclcpp_lifecycle::State & /*previous_state*/)
+{
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"), "on_deactivate: stopping RT control");
+	if (mode == "real") {
+		Drfl.stop_rt_control();
+		RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"), "RT control stopped");
+	}
+	return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn DRHWInterface::on_cleanup(const rclcpp_lifecycle::State & /*previous_state*/)
+{
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"), "on_cleanup: closing robot connection");
+	Drfl.close_connection();
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"), "Robot connection closed");
+	return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn DRHWInterface::on_shutdown(const rclcpp_lifecycle::State & /*previous_state*/)
+{
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"), "on_shutdown: stopping RT and closing connection");
+	Drfl.stop_rt_control();
+	Drfl.close_connection();
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"), "_______________________________________________");
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"), "    SHUTDOWN COMPLETE - CONNECTION CLOSED");
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"), "_______________________________________________");
+	return CallbackReturn::SUCCESS;
+}
+
 DRHWInterface::~DRHWInterface()
 {
 	Drfl.stop_rt_control();
@@ -536,9 +565,9 @@ DRHWInterface::~DRHWInterface()
 	// Drfl.disconnect_rt_control();
 	Drfl.close_connection();
 
-	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"),"_______________________________________________\n"); 
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"),"_______________________________________________\n");
 	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"),"    CONNECTION IS CLOSED");
-	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"),"_______________________________________________\n"); 
+	RCLCPP_INFO(rclcpp::get_logger("dsr_hw_interface2"),"_______________________________________________\n");
 }
 
 }

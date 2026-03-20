@@ -74,10 +74,32 @@ private:
     }
 };
 
+static std::shared_ptr<MyNode> g_node = nullptr;
+
+void signal_handler(int signum) {
+    RCLCPP_INFO(rclcpp::get_logger("dsr_control_node2"),
+        "Signal %d received, initiating graceful shutdown", signum);
+    if (g_node) {
+        g_node.reset();
+    }
+    rclcpp::shutdown();
+}
+
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<MyNode>();
-    rclcpp::spin(node);
-    rclcpp::shutdown();
+    g_node = std::make_shared<MyNode>();
+
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    rclcpp::spin(g_node);
+
+    // Ensure cleanup even if spin exits without signal
+    if (g_node) {
+        g_node.reset();
+    }
+    if (rclcpp::ok()) {
+        rclcpp::shutdown();
+    }
     return 0;
 }
