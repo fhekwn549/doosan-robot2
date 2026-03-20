@@ -107,18 +107,19 @@ controller_interface::CallbackReturn RobotController::on_configure(const rclcpp_
 	Drfl->set_on_homming_completed(DRFL_CALLBACKS::OnHommingCompletedCB);
 	Drfl->set_on_program_stopped(DRFL_CALLBACKS::OnProgramStoppedCB);
 	Drfl->set_on_monitoring_modbus(DRFL_CALLBACKS::OnMonitoringModbusCB);
-	Drfl->set_on_monitoring_data(DRFL_CALLBACKS::OnMonitoringDataCB);           // Callback function in M2.4 and earlier
-	Drfl->set_on_monitoring_ctrl_io(DRFL_CALLBACKS::OnMonitoringCtrlIOCB);       // Callback function in M2.4 and earlier
-	Drfl->set_on_monitoring_state(DRFL_CALLBACKS::OnMonitoringStateCB);//RELATED TO LOGIC
-	Drfl->set_on_monitoring_access_control(DRFL_CALLBACKS::OnMonitoringAccessControlCB);//RELATED TO LOGIC
+	Drfl->set_on_monitoring_ctrl_io(DRFL_CALLBACKS::OnMonitoringCtrlIOCB);
+	Drfl->set_on_monitoring_state(DRFL_CALLBACKS::OnMonitoringStateCB);
+	Drfl->set_on_monitoring_access_control(DRFL_CALLBACKS::OnMonitoringAccessControlCB);
 	Drfl->set_on_log_alarm(DRFL_CALLBACKS::OnLogAlarm);
 	Drfl->set_on_disconnected(DRFL_CALLBACKS::OnDisConnected);
-	Drfl->set_on_monitoring_data_ex(DRFL_CALLBACKS::OnMonitoringDataExCB);
+	// NOTE: OnMonitoringDataCB (below M2.12) has been removed.
+	// Minimum supported DRCF version is M2.12. Please update robot firmware if below M2.12.
+	Drfl->set_on_monitoring_data_ex(DRFL_CALLBACKS::OnMonitoringDataExCB);  // M2.12+
 
     // create publishers by key
     if (use_rt_topic_pub_) {
         rt_pub_map_.clear();
-        for (const auto& key : rt_topic_keys_) 
+        for (const auto& key : rt_topic_keys_)
         {
         auto topic = "/rt_topic/" + key; // topic name
         rt_pub_map_[key] = get_node()->create_publisher<std_msgs::msg::Float32MultiArray>(topic, rclcpp::SystemDefaultsQoS());
@@ -128,6 +129,15 @@ controller_interface::CallbackReturn RobotController::on_configure(const rclcpp_
         const int rt_ms = get_node()->get_parameter(PARAM_RT_TIMER_MS).as_int();
         rt_timer_ = get_node()->create_wall_timer(std::chrono::milliseconds(rt_ms),std::bind(&RobotController::publish_read_data_rt_selected, this));
     }
+
+    // IO state topic publisher: publishes ctrl-box DI[16] + DO[16] at 10 Hz.
+    // Works in both virtual and real mode via the g_stDrState cache populated by
+    // OnMonitoringCtrlIOCB. Layout: data[0..15] = DI[1..16], data[16..31] = DO[1..16]
+    ctrl_io_pub_ = get_node()->create_publisher<std_msgs::msg::UInt8MultiArray>(
+        "io/ctrl_box_digital_input_state", rclcpp::SystemDefaultsQoS());
+    ctrl_io_timer_ = get_node()->create_wall_timer(
+        std::chrono::milliseconds(100),
+        std::bind(&RobotController::publish_ctrl_io_state, this));
 
   return CallbackReturn::SUCCESS;
 }
@@ -154,6 +164,20 @@ void RobotController::publish_read_data_rt_selected() {
     msg.data = std::move(vals); // using raw data
     it->second->publish(msg);
   }
+}
+
+// Publishes ctrl-box digital IO state from g_stDrState (populated by OnMonitoringCtrlIOCB).
+// data[0..15]  = DI[1..16] (controller_digital_input, 1-based index)
+// data[16..31] = DO[1..16] (controller_digital_output, 1-based index)
+// Works in both virtual and real mode; values are 0 when no monitoring data received yet.
+void RobotController::publish_ctrl_io_state() {
+    std_msgs::msg::UInt8MultiArray msg;
+    msg.data.resize(32, 0);
+    for (int i = 0; i < 16; i++) {
+        msg.data[i]      = g_stDrState.bCtrlBoxDigitalInput[i]  ? 1u : 0u;
+        msg.data[16 + i] = g_stDrState.bCtrlBoxDigitalOutput[i] ? 1u : 0u;
+    }
+    ctrl_io_pub_->publish(msg);
 }
 
 // Extracts a specific field from the real-time data structure (LPRT_OUTPUT_DATA_LIST)
@@ -874,10 +898,10 @@ auto set_singularity_handling_cb = [this](const std::shared_ptr<dsr_msgs2::srv::
     res->success = Drfl->set_singularity_handling((SINGULARITY_AVOIDANCE)req->mode);      
 };
 
-auto set_singularity_handling_force_cb = [this](const std::shared_ptr<dsr_msgs2::srv::SetSingularityHandlingForce::Request> req, std::shared_ptr<dsr_msgs2::srv::SetSingularityHandlingForce::Response> res) -> void
+auto set_singular_handling_force_cb = [this](const std::shared_ptr<dsr_msgs2::srv::SetSingularHandlingForce::Request> req, std::shared_ptr<dsr_msgs2::srv::SetSingularHandlingForce::Response> res) -> void
 {
 #if (_DEBUG_DSR_CTL)
-    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"< set_singularity_handling_force_cb >");
+    RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"< set_singular_handling_force_cb >");
     RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"    mode = %d",req->mode);
 #endif
     res->success = Drfl->set_singular_handling_force((SINGULARITY_FORCE_HANDLING)req->mode);      
@@ -2366,6 +2390,57 @@ auto torque_rt_cb = [this](const std::shared_ptr<dsr_msgs2::msg::TorqueRtStream>
     Drfl->torque_rt(tor.data(), time);
 };
 
+auto get_input_register_int_cb = [this](const std::shared_ptr<dsr_msgs2::srv::GetInputRegisterInt::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::GetInputRegisterInt::Response> res) -> void 
+{
+    res->success = Drfl->get_input_register_int(req->address, res->value, req->timeout_ms);
+};
+
+auto get_input_register_bit_cb = [this](const std::shared_ptr<dsr_msgs2::srv::GetInputRegisterBit::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::GetInputRegisterBit::Response> res) -> void 
+{
+    res->success = Drfl->get_input_register_bit(req->address, res->value, req->timeout_ms);
+};
+auto get_input_register_float_cb = [this](const std::shared_ptr<dsr_msgs2::srv::GetInputRegisterFloat::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::GetInputRegisterFloat::Response> res) -> void 
+{
+    float temp_value;
+    res->success = Drfl->get_input_register_float(req->address, temp_value, req->timeout_ms);
+    res->value = temp_value;
+};
+auto get_output_register_int_cb = [this](const std::shared_ptr<dsr_msgs2::srv::GetOutputRegisterInt::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::GetOutputRegisterInt::Response> res) -> void 
+{
+    res->success = Drfl->get_output_register_int(req->address, res->value, req->timeout_ms);
+};
+auto get_output_register_bit_cb = [this](const std::shared_ptr<dsr_msgs2::srv::GetOutputRegisterBit::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::GetOutputRegisterBit::Response> res) -> void 
+{
+    res->success = Drfl->get_output_register_bit(req->address, res->value, req->timeout_ms);
+};
+auto get_output_register_float_cb = [this](const std::shared_ptr<dsr_msgs2::srv::GetOutputRegisterFloat::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::GetOutputRegisterFloat::Response> res) -> void 
+{
+    float temp_value;
+    res->success = Drfl->get_output_register_float(req->address, temp_value, req->timeout_ms);
+    res->value = temp_value;
+};
+
+auto set_output_register_int_cb = [this](const std::shared_ptr<dsr_msgs2::srv::SetOutputRegisterInt::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::SetOutputRegisterInt::Response> res) -> void 
+{
+    res->success = Drfl->set_output_register_int(req->address, req->value);
+};
+auto set_output_register_bit_cb = [this](const std::shared_ptr<dsr_msgs2::srv::SetOutputRegisterBit::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::SetOutputRegisterBit::Response> res) -> void 
+{
+    res->success = Drfl->set_output_register_bit(req->address, req->value);
+};
+auto set_output_register_float_cb = [this](const std::shared_ptr<dsr_msgs2::srv::SetOutputRegisterFloat::Request> req, 
+                                      std::shared_ptr<dsr_msgs2::srv::SetOutputRegisterFloat::Response> res) -> void 
+{
+    res->success = Drfl->set_output_register_float(req->address, req->value);
+};
 
   error_log_pub_ = get_node()->create_publisher<dsr_msgs2::msg::RobotError>("error", 100);
   disconnect_pub_ = get_node()->create_publisher<dsr_msgs2::msg::RobotDisconnection>("robot_disconnection", 100);
@@ -2427,7 +2502,7 @@ auto torque_rt_cb = [this](const std::shared_ptr<dsr_msgs2::msg::TorqueRtStream>
   m_nh_srv_alter_motion               = get_node()->create_service<dsr_msgs2::srv::AlterMotion>("motion/alter_motion", alter_motion_cb);              
   m_nh_srv_disable_alter_motion       = get_node()->create_service<dsr_msgs2::srv::DisableAlterMotion>("motion/disable_alter_motion", disable_alter_motion_cb);                  
   m_nh_srv_set_singularity_handling   = get_node()->create_service<dsr_msgs2::srv::SetSingularityHandling>("motion/set_singularity_handling", set_singularity_handling_cb);                      
-  m_nh_srv_set_singularity_handling_force = get_node()->create_service<dsr_msgs2::srv::SetSingularityHandlingForce>("motion/set_singularity_handling_force", set_singularity_handling_force_cb);
+  m_nh_srv_set_singular_handling_force = get_node()->create_service<dsr_msgs2::srv::SetSingularHandlingForce>("motion/set_singular_handling_force", set_singular_handling_force_cb);
 
   //  auxiliary_control
   m_nh_srv_get_control_mode               = get_node()->create_service<dsr_msgs2::srv::GetControlMode>("aux_control/get_control_mode", get_control_mode_cb);                           
@@ -2536,6 +2611,234 @@ auto torque_rt_cb = [this](const std::shared_ptr<dsr_msgs2::msg::TorqueRtStream>
   m_nh_set_accx_rt = get_node()->create_service<dsr_msgs2::srv::SetAccxRt>("realtime/set_accx_rt", set_accx_rt_cb);
   m_nh_read_data_rt = get_node()->create_service<dsr_msgs2::srv::ReadDataRt>("realtime/read_data_rt", read_data_rt_cb);
   m_nh_write_data_rt = get_node()->create_service<dsr_msgs2::srv::WriteDataRt>("realtime/write_data_rt", write_data_rt_cb);
+  
+  // PLC
+  m_nh_srv_get_input_register_int = get_node()->create_service<dsr_msgs2::srv::GetInputRegisterInt>("plc/get_input_register_int", get_input_register_int_cb);
+  m_nh_srv_get_input_register_bit = get_node()->create_service<dsr_msgs2::srv::GetInputRegisterBit>("plc/get_input_register_bit", get_input_register_bit_cb);
+  m_nh_srv_get_input_register_float = get_node()->create_service<dsr_msgs2::srv::GetInputRegisterFloat>("plc/get_input_register_float", get_input_register_float_cb);
+  m_nh_srv_set_output_register_int = get_node()->create_service<dsr_msgs2::srv::SetOutputRegisterInt>("plc/set_output_register_int", set_output_register_int_cb);
+  m_nh_srv_set_output_register_bit = get_node()->create_service<dsr_msgs2::srv::SetOutputRegisterBit>("plc/set_output_register_bit", set_output_register_bit_cb);
+  m_nh_srv_set_output_register_float = get_node()->create_service<dsr_msgs2::srv::SetOutputRegisterFloat>("plc/set_output_register_float", set_output_register_float_cb);
+  m_nh_srv_get_output_register_int = get_node()->create_service<dsr_msgs2::srv::GetOutputRegisterInt>("plc/get_output_register_int", get_output_register_int_cb);
+  m_nh_srv_get_output_register_bit = get_node()->create_service<dsr_msgs2::srv::GetOutputRegisterBit>("plc/get_output_register_bit", get_output_register_bit_cb);
+  m_nh_srv_get_output_register_float = get_node()->create_service<dsr_msgs2::srv::GetOutputRegisterFloat>("plc/get_output_register_float", get_output_register_float_cb);
+
+  // H2r
+  rclcpp::QoS qos_profile(10); //`rmw_qos_profile_services_default` has been deprecated using qos(depth) instead
+  
+//   // H2r
+//   using JogH2r = dsr_msgs2::action::JogH2r;
+//   using GoalHandleJogH2r = rclcpp_action::ServerGoalHandle<JogH2r>;
+
+//     auto handle_goal_jog_h2r = [this](const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const JogH2r::Goal> goal) {
+//       RCLCPP_INFO(get_node()->get_logger(), "Received goal request for JogH2r");
+//       (void)uuid;
+//       (void)goal;
+//       return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+//   };
+
+//   auto handle_cancel_jog_h2r = [this](const std::shared_ptr<GoalHandleJogH2r> goal_handle) {
+//       RCLCPP_INFO(get_node()->get_logger(), "Received request to cancel goal");
+//       (void)goal_handle;
+//       return rclcpp_action::CancelResponse::ACCEPT;
+//   };
+
+//   auto handle_accepted_jog_h2r = [this](const std::shared_ptr<GoalHandleJogH2r> goal_handle) {
+//       std::thread{ [this, goal_handle]() {
+//           const auto goal = goal_handle->get_goal();
+//           auto feedback = std::make_shared<JogH2r::Feedback>();
+//           auto result = std::make_shared<JogH2r::Result>();
+          
+//           RCLCPP_INFO(get_node()->get_logger(), "Executing JogH2r goal");
+          
+//           // Execute Jog Motion
+//           // Map action goal fields to Drfl->jog parameters
+//           // Parameters: (JOG_AXIS)jog_axis, (MOVE_REFERENCE)move_reference, (float)velocity
+//           bool is_started = Drfl->jog_h2r((JOG_AXIS)goal->jog_axis, (MOVE_REFERENCE)goal->move_reference, goal->velocity);
+          
+//           if (!is_started) {
+//               RCLCPP_ERROR(get_node()->get_logger(), "Failed to start JogH2r motion");
+//               result->success = false;
+//               goal_handle->abort(result);
+//               return;
+//           }
+
+//           rclcpp::Rate loop_rate(100); // 100Hz check
+
+//           // Keep loop until cancellation or shutdown
+//           while(rclcpp::ok()) { 
+//               if (goal_handle->is_canceling()) {
+//                   Drfl->stop(STOP_TYPE_QUICK); // Stop the robot immediately
+//                   result->success = true;
+//                   goal_handle->canceled(result);
+//                   RCLCPP_INFO(get_node()->get_logger(), "JogH2r Goal canceled");
+//                   return;
+//               }
+
+//               // Update Feedback: Get current robot pose (Task Space)
+//               LPROBOT_POSE cur_pos = Drfl->get_current_pose(); 
+//               if(cur_pos) {
+//                  for(int j=0; j<6; ++j) feedback->pos[j] = cur_pos->_fPosition[j];
+//               }
+//               Drfl->hold2run(); // Update H2r internal state
+              
+//               goal_handle->publish_feedback(feedback);
+//               loop_rate.sleep();
+//           }
+//       }}.detach();
+//   };
+
+//   m_nh_srv_jog_h2r = rclcpp_action::create_server<JogH2r>(get_node(), "motion/jog_h2r", handle_goal_jog_h2r, handle_cancel_jog_h2r, handle_accepted_jog_h2r);
+  
+  using MovejH2r = dsr_msgs2::action::MovejH2r;
+  using GoalHandleMovejH2r = rclcpp_action::ServerGoalHandle<MovejH2r>;
+  using MovelH2r = dsr_msgs2::action::MovelH2r;
+  using GoalHandleMovelH2r = rclcpp_action::ServerGoalHandle<MovelH2r>;
+
+  auto handle_goal_movej_h2r = [this](const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const MovejH2r::Goal> goal) {
+      RCLCPP_INFO(get_node()->get_logger(), "Received goal request for MovejH2r");
+      (void)uuid;
+      (void)goal;
+      return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+  };
+
+  auto handle_cancel_movej_h2r = [this](const std::shared_ptr<GoalHandleMovejH2r> goal_handle) {
+      RCLCPP_INFO(get_node()->get_logger(), "Received request to cancel goal");
+      (void)goal_handle;
+      return rclcpp_action::CancelResponse::ACCEPT;
+  };
+
+  auto handle_accepted_movej_h2r = [this](const std::shared_ptr<GoalHandleMovejH2r> goal_handle) {
+      std::thread{ [this, goal_handle]() {
+          const auto goal = goal_handle->get_goal();
+          auto feedback = std::make_shared<MovejH2r::Feedback>();
+          auto result = std::make_shared<MovejH2r::Result>();
+          RCLCPP_INFO(get_node()->get_logger(), "Executing MovejH2r goal");
+          std::array<float, 6> pos_f;
+          std::array<float, 6> vel_f;
+          std::array<float, 6> acc_f;
+          for (size_t i = 0; i < NUM_JOINT; ++i) {
+            pos_f[i] = static_cast<float>(goal->target_pos[i]);
+            vel_f[i] = static_cast<float>(goal->target_vel[i]);
+            acc_f[i] = static_cast<float>(goal->target_acc[i]);
+          }
+
+          // Execute Movej Motion
+          bool is_started = Drfl->movej_h2r(pos_f.data(), vel_f.data(), acc_f.data());
+          if (!is_started) {
+              RCLCPP_ERROR(get_node()->get_logger(), "Failed to start MovejH2r motion");
+              result->success = false;
+              goal_handle->abort(result);
+              return;
+          }
+          rclcpp::Rate loop_rate(100); // 100Hz check
+          // Keep loop until cancellation or shutdown
+          while(rclcpp::ok()) { 
+              if (goal_handle->is_canceling()) {
+                  Drfl->stop(STOP_TYPE_QUICK); // Stop the robot immediately
+                  result->success = true;
+                  goal_handle->canceled(result);
+                  RCLCPP_INFO(get_node()->get_logger(), "MovejH2r Goal canceled");
+                  return;
+              }
+              // Update Feedback: Get current robot pose (Task Space)
+              LPROBOT_POSE cur_pos = Drfl->get_current_pose(); 
+              if(cur_pos) {
+                 for(int j=0; j<6; ++j) feedback->pos[j] = cur_pos->_fPosition[j];
+                 bool is_arrived = true;
+                 for(int i=0; i<6; i++) {
+                     if(std::abs(cur_pos->_fPosition[i] - goal->target_pos[i]) > 0.1) {
+                        is_arrived = false;
+                        break;
+                     }
+                 }
+                 if(is_arrived) {
+                     Drfl->stop(STOP_TYPE_QUICK);
+                     result->success = true;
+                     goal_handle->succeed(result);
+                     RCLCPP_INFO(get_node()->get_logger(), "MovejH2r Goal Arrived");
+                     return;
+                 }
+              }
+              Drfl->hold2run(); // Update H2r internal state
+              goal_handle->publish_feedback(feedback);
+              loop_rate.sleep();
+          }
+      }}.detach();
+  };
+
+  auto handle_goal_movel_h2r = [this](const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const MovelH2r::Goal> goal) {
+      RCLCPP_INFO(get_node()->get_logger(), "Received goal request for MovelH2r");
+      (void)uuid;
+      (void)goal;
+      return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+  };
+
+  auto handle_cancel_movel_h2r = [this](const std::shared_ptr<GoalHandleMovelH2r> goal_handle) {
+      RCLCPP_INFO(get_node()->get_logger(), "Received request to cancel goal");
+      (void)goal_handle;
+      return rclcpp_action::CancelResponse::ACCEPT;
+  };
+
+  auto handle_accepted_movel_h2r = [this](const std::shared_ptr<GoalHandleMovelH2r> goal_handle) {
+      std::thread{ [this, goal_handle]() {
+          const auto goal = goal_handle->get_goal();
+          auto feedback = std::make_shared<MovelH2r::Feedback>();
+          auto result = std::make_shared<MovelH2r::Result>();
+          RCLCPP_INFO(get_node()->get_logger(), "Executing MovelH2r goal");
+          std::array<float, 6> pos_f;
+          std::array<float, 2> vel_f = {static_cast<float>(goal->target_vel[0]), static_cast<float>(goal->target_vel[1])};
+          std::array<float, 2> acc_f = {static_cast<float>(goal->target_acc[0]), static_cast<float>(goal->target_acc[1])};
+          for (size_t i = 0; i < NUM_JOINT; ++i) {
+            pos_f[i] = static_cast<float>(goal->target_pos[i]);
+          }
+          // Execute Movel Motion
+          bool is_started = Drfl->movel_h2r(pos_f.data(), vel_f.data(), acc_f.data());
+          if (!is_started) {
+              RCLCPP_ERROR(get_node()->get_logger(), "Failed to start MovelH2r motion");
+              result->success = false;
+              goal_handle->abort(result);
+              return;
+          }
+          rclcpp::Rate loop_rate(100); // 100Hz check
+          // Keep loop until cancellation or shutdown
+          while(rclcpp::ok()) { 
+              if (goal_handle->is_canceling()) {
+                  Drfl->stop(STOP_TYPE_QUICK); // Stop the robot immediately
+                  result->success = true;
+                  goal_handle->canceled(result);
+                  RCLCPP_INFO(get_node()->get_logger(), "MovelH2r Goal canceled");
+                  return;
+              }
+              // Update Feedback: Get current robot pose (Task Space)
+              LPROBOT_POSE cur_pos = Drfl->get_current_pose(ROBOT_SPACE_TASK); 
+              if(cur_pos) {
+                 for(int j=0; j<6; ++j) feedback->pos[j] = cur_pos->_fPosition[j];
+                 bool is_arrived = true;
+                 for(int i=0; i<6; i++) {
+                     if(std::abs(cur_pos->_fPosition[i] - goal->target_pos[i]) > 0.3) {
+                        is_arrived = false;
+                        break;
+                     }
+                 }
+                 if(is_arrived) {
+                     Drfl->stop(STOP_TYPE_QUICK);
+                     result->success = true;
+                     goal_handle->succeed(result);
+                     RCLCPP_INFO(get_node()->get_logger(), "MovelH2r Goal Arrived");
+                     return;
+                 }
+              }
+              Drfl->hold2run(); // Update H2r internal state
+              goal_handle->publish_feedback(feedback);
+              loop_rate.sleep();
+          }
+      }}.detach();
+  };
+
+  //move_to
+  m_nh_srv_movej_h2r = rclcpp_action::create_server<MovejH2r>(get_node(), "motion/movej_h2r", handle_goal_movej_h2r, handle_cancel_movej_h2r, handle_accepted_movej_h2r);
+  m_nh_srv_movel_h2r = rclcpp_action::create_server<MovelH2r>(get_node(), "motion/movel_h2r", handle_goal_movel_h2r, handle_cancel_movel_h2r, handle_accepted_movel_h2r);
 
   memset(&g_stDrState, 0x00, sizeof(DR_STATE)); 
 
@@ -2682,69 +2985,9 @@ void OnMonitoringCtrlIOExCB (const LPMONITORING_CTRLIO_EX pCtrlIO)
     //-------------------------------------------------------------------------
 }
 
-// M2.4 or lower
-void OnMonitoringDataCB(const LPMONITORING_DATA pData)
-{
-    // This function is called every 100 msec
-    // Only work within 50msec
-    //RCLCPP_INFO(rclcpp::get_logger("dsr_controller2"),"OnMonitoringDataCB");
-
-    g_stDrState.nActualMode  = pData->_tCtrl._tState._iActualMode;                  // position control: 0, torque control: 1 ?????
-    g_stDrState.nActualSpace = pData->_tCtrl._tState._iActualSpace;                 // joint space: 0, task space: 1    
-
-    for (int i = 0; i < NUM_JOINT; i++){
-        if(pData){  
-            // joint         
-            g_stDrState.fCurrentPosj[i] = pData->_tCtrl._tJoint._fActualPos[i];     // Position Actual Value in INC     
-            g_stDrState.fCurrentVelj[i] = pData->_tCtrl._tJoint._fActualVel[i];     // Velocity Actual Value
-            g_stDrState.fJointAbs[i]    = pData->_tCtrl._tJoint._fActualAbs[i];     // Position Actual Value in ABS
-            g_stDrState.fJointErr[i]    = pData->_tCtrl._tJoint._fActualErr[i];     // Joint Error
-            g_stDrState.fTargetPosj[i]  = pData->_tCtrl._tJoint._fTargetPos[i];     // Target Position
-            g_stDrState.fTargetVelj[i]  = pData->_tCtrl._tJoint._fTargetVel[i];     // Target Velocity
-            // task
-            g_stDrState.fCurrentPosx[i]     = pData->_tCtrl._tTask._fActualPos[0][i];   //????? <---------이것 2개다 확인할 것  
-            g_stDrState.fCurrentToolPosx[i] = pData->_tCtrl._tTask._fActualPos[1][i];   //????? <---------이것 2개다 확인할 것  
-            g_stDrState.fCurrentVelx[i] = pData->_tCtrl._tTask._fActualVel[i];      // Velocity Actual Value
-            g_stDrState.fTaskErr[i]     = pData->_tCtrl._tTask._fActualErr[i];      // Task Error
-            g_stDrState.fTargetPosx[i]  = pData->_tCtrl._tTask._fTargetPos[i];      // Target Position
-            g_stDrState.fTargetVelx[i]  = pData->_tCtrl._tTask._fTargetVel[i];      // Target Velocity
-            // Torque
-            g_stDrState.fDynamicTor[i]  = pData->_tCtrl._tTorque._fDynamicTor[i];   // Dynamics Torque
-            g_stDrState.fActualJTS[i]   = pData->_tCtrl._tTorque._fActualJTS[i];    // Joint Torque Sensor Value
-            g_stDrState.fActualEJT[i]   = pData->_tCtrl._tTorque._fActualEJT[i];    // External Joint Torque
-            g_stDrState.fActualETT[i]   = pData->_tCtrl._tTorque._fActualETT[i];    // External Task Force/Torque
-
-            g_stDrState.nActualBK[i]    = pData->_tMisc._iActualBK[i];              // brake state     
-            g_stDrState.fActualMC[i]    = pData->_tMisc._fActualMC[i];              // motor input current
-            g_stDrState.fActualMT[i]    = pData->_tMisc._fActualMT[i];              // motor current temperature
-        }
-    }
-    g_stDrState.nSolutionSpace  = pData->_tCtrl._tTask._iSolutionSpace;             // Solution Space
-    g_stDrState.dSyncTime       = pData->_tMisc._dSyncTime;                         // inner clock counter  
-
-    for (int i = 5; i < NUM_BUTTON; i++){
-        if(pData){
-            g_stDrState.nActualBT[i]    = pData->_tMisc._iActualBT[i];              // robot button state
-        }
-    }
-
-    for(int i = 0; i < 3; i++){
-        for(int j = 0; j < 3; j++){
-            if(pData){
-                g_stDrState.fRotationMatrix[j][i] = pData->_tCtrl._tTask._fRotationMatrix[j][i];    // Rotation Matrix
-            }
-        }
-    }
-
-    for (int i = 0; i < NUM_FLANGE_IO; i++){
-        if(pData){
-            g_stDrState.bFlangeDigitalInput[i]  = pData->_tMisc._iActualDI[i];      // Digital Input data             
-            g_stDrState.bFlangeDigitalOutput[i] = pData->_tMisc._iActualDO[i];      // Digital output data
-        }
-    }
-}
-
-// M2.5 or higher    
+// Minimum supported DRCF version: M2.12
+// OnMonitoringDataCB (below M2.12) has been removed. This driver no longer supports below M2.12.
+// If your robot firmware is below M2.12, please update it before using this driver.
 void OnMonitoringDataExCB(const LPMONITORING_DATA_EX pData)
 {
     // This function is called every 100 msec
@@ -2885,7 +3128,7 @@ void OnMonitoringStateCB(const ROBOT_STATE eState)
         }
         break;
     case STATE_RECOVERY:
-        Drfl->set_robot_control(CONTROL_RESET_RECOVERY);
+        // Drfl->set_robot_control(CONTROL_RESET_RECOVERY);
         break;
     default:
         break;
@@ -2985,15 +3228,18 @@ void OnLogAlarm(LPLOG_ALARM pLogAlarm)
 
 void OnDisConnected(){
 	RCLCPP_ERROR(rclcpp::get_logger("dsr_controller2"),"Disconnected.. Please check out Ethernet Cable.. ");
-	Drfl->stop_rt_control();
-    // To-do : Update disconnection function in controller version v3.6
-    // Drfl->disconnect_rt_control();
-	Drfl->close_connection(); // clean-up
-
-	
-	if(0 == instance->disconnect_pub_.use_count())	return;
-	dsr_msgs2::msg::RobotDisconnection msg;
-	instance->disconnect_pub_->publish(msg);
+    // Ensure connection is closed
+    if(Drfl) {
+        Drfl->stop_rt_control();
+        // To-do : Update disconnection function in controller version v3.6
+        // Drfl->disconnect_rt_control();
+        Drfl->close_connection(); // clean-up
+    }
+    if(rclcpp::ok() && instance && instance->disconnect_pub_)
+    {
+        dsr_msgs2::msg::RobotDisconnection msg;
+        instance->disconnect_pub_->publish(msg);
+    }
 }
 
 }

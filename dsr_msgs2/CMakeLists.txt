@@ -12,6 +12,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(action_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
@@ -78,7 +79,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/motion/AlterMotion.srv"
   "srv/motion/DisableAlterMotion.srv"
   "srv/motion/SetSingularityHandling.srv"
-  "srv/motion/SetSingularityHandlingForce.srv"
+  "srv/motion/SetSingularHandlingForce.srv"
 
   "srv/aux_control/GetControlMode.srv"              
   "srv/aux_control/GetControlSpace.srv"             
@@ -144,6 +145,16 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/io/SetCtrlBoxAnalogOutputType.srv"
   "srv/io/SetCtrlBoxAnalogOutput.srv"
   "srv/io/GetCtrlBoxAnalogInput.srv"
+
+  "srv/plc/GetInputRegisterBit.srv"
+  "srv/plc/GetInputRegisterInt.srv"
+  "srv/plc/GetInputRegisterFloat.srv"
+  "srv/plc/GetOutputRegisterBit.srv"
+  "srv/plc/GetOutputRegisterInt.srv"
+  "srv/plc/GetOutputRegisterFloat.srv"
+  "srv/plc/SetOutputRegisterBit.srv"
+  "srv/plc/SetOutputRegisterInt.srv"
+  "srv/plc/SetOutputRegisterFloat.srv"
     
   "srv/modbus/ConfigCreateModbus.srv"
   "srv/modbus/ConfigDeleteModbus.srv"
@@ -183,7 +194,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/realtime/StopRtControl.srv"
   "srv/realtime/WriteDataRt.srv"
 
-  DEPENDENCIES builtin_interfaces std_msgs  
+  "action/JogH2r.action"
+  "action/MovejH2r.action"
+  "action/MovelH2r.action"
+
+
+  DEPENDENCIES builtin_interfaces std_msgs action_msgs 
 )
 
 ament_export_dependencies(rosidl_default_runtime)

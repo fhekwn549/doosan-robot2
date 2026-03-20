@@ -25,6 +25,7 @@
 #include "rclcpp/timer.hpp"
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
 #include "rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
 #include "realtime_tools/realtime_buffer.h"
 #include "std_msgs/msg/string.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
@@ -48,8 +49,7 @@
 #include <dsr_msgs2/msg/robot_error.hpp>
 #include <dsr_msgs2/msg/robot_disconnection.hpp>
 
-
-
+//srv
 //system
 #include "dsr_msgs2/srv/set_robot_mode.hpp"
 #include "dsr_msgs2/srv/get_robot_mode.hpp"
@@ -94,7 +94,7 @@
 #include "dsr_msgs2/srv/alter_motion.hpp"
 #include "dsr_msgs2/srv/disable_alter_motion.hpp"
 #include "dsr_msgs2/srv/set_singularity_handling.hpp"
-#include "dsr_msgs2/srv/set_singularity_handling_force.hpp"
+#include "dsr_msgs2/srv/set_singular_handling_force.hpp"
 
 //----- auxiliary_control
 #include "dsr_msgs2/srv/get_control_mode.hpp"          
@@ -154,6 +154,17 @@
 #include "dsr_msgs2/srv/get_ctrl_box_digital_output.hpp"
 #include "dsr_msgs2/srv/get_tool_digital_output.hpp"
 
+//plc
+#include "dsr_msgs2/srv/get_input_register_bit.hpp"
+#include "dsr_msgs2/srv/get_input_register_int.hpp"
+#include "dsr_msgs2/srv/get_input_register_float.hpp"
+#include "dsr_msgs2/srv/get_output_register_bit.hpp"
+#include "dsr_msgs2/srv/get_output_register_int.hpp"
+#include "dsr_msgs2/srv/get_output_register_float.hpp"
+#include "dsr_msgs2/srv/set_output_register_bit.hpp"
+#include "dsr_msgs2/srv/set_output_register_int.hpp"
+#include "dsr_msgs2/srv/set_output_register_float.hpp"
+
 //modbus
 #include "dsr_msgs2/srv/set_modbus_output.hpp"
 #include "dsr_msgs2/srv/get_modbus_input.hpp"
@@ -207,7 +218,13 @@
 #include "dsr_msgs2/srv/stop_rt_control.hpp"
 #include "dsr_msgs2/srv/write_data_rt.hpp"
 
+// action
+#include "dsr_msgs2/action/jog_h2r.hpp"
+#include "dsr_msgs2/action/movej_h2r.hpp"
+#include "dsr_msgs2/action/movel_h2r.hpp"
+
 #include "std_msgs/msg/float32_multi_array.hpp"
+#include "std_msgs/msg/u_int8_multi_array.hpp"
 
 
 #include "../../../dsr_common2/include/DRFLEx.h"
@@ -505,7 +522,6 @@ namespace DRFL_CALLBACKS {
   void OnProgramStoppedCB(const PROGRAM_STOP_CAUSE /*iStopCause*/);
   void OnMonitoringCtrlIOCB (const LPMONITORING_CTRLIO pCtrlIO);
   void OnMonitoringCtrlIOExCB (const LPMONITORING_CTRLIO_EX pCtrlIO);
-  void OnMonitoringDataCB(const LPMONITORING_DATA pData);
   void OnMonitoringDataExCB(const LPMONITORING_DATA_EX pData);
   void OnMonitoringModbusCB (const LPMONITORING_MODBUS pModbus);
   void OnMonitoringStateCB(const ROBOT_STATE eState);
@@ -624,7 +640,7 @@ protected:
   rclcpp::Service<dsr_msgs2::srv::AlterMotion>::SharedPtr             m_nh_srv_alter_motion;
   rclcpp::Service<dsr_msgs2::srv::DisableAlterMotion>::SharedPtr      m_nh_srv_disable_alter_motion;
   rclcpp::Service<dsr_msgs2::srv::SetSingularityHandling>::SharedPtr  m_nh_srv_set_singularity_handling;
-  rclcpp::Service<dsr_msgs2::srv::SetSingularityHandlingForce>::SharedPtr m_nh_srv_set_singularity_handling_force;
+  rclcpp::Service<dsr_msgs2::srv::SetSingularHandlingForce>::SharedPtr m_nh_srv_set_singular_handling_force;
   
   rclcpp::Service<dsr_msgs2::srv::GetControlMode>::SharedPtr               m_nh_srv_get_control_mode;          
   rclcpp::Service<dsr_msgs2::srv::GetControlSpace>::SharedPtr              m_nh_srv_get_control_space;         
@@ -733,6 +749,30 @@ protected:
   rclcpp::Service<dsr_msgs2::srv::SetAccxRt>::SharedPtr                     m_nh_set_accx_rt;
   rclcpp::Service<dsr_msgs2::srv::ReadDataRt>::SharedPtr                    m_nh_read_data_rt;
   rclcpp::Service<dsr_msgs2::srv::WriteDataRt>::SharedPtr                   m_nh_write_data_rt;
+  
+  rclcpp_action::Server<dsr_msgs2::action::JogH2r>::SharedPtr               m_nh_srv_jog_h2r;
+  rclcpp_action::Server<dsr_msgs2::action::MovejH2r>::SharedPtr              m_nh_srv_movej_h2r;
+  rclcpp_action::Server<dsr_msgs2::action::MovelH2r>::SharedPtr              m_nh_srv_movel_h2r;
+
+  //----- PLC
+  //   m_nh_srv_get_input_register_int = get_node()->create_service<dsr_msgs2::srv::GetInputRegisterInt>("plc/get_input_register_int", get_input_register_int_cb);
+  // m_nh_srv_get_input_register_bit = get_node()->create_service<dsr_msgs2::srv::GetInputRegisterBit>("plc/get_input_register_bit", get_input_register_bit_cb);
+  // m_nh_srv_get_input_register_float = get_node()->create_service<dsr_msgs2::srv::GetInputRegisterFloat>("plc/get_input_register_float", get_input_register_float_cb);
+  // m_nh_srv_set_output_register_int = get_node()->create_service<dsr_msgs2::srv::SetOutputRegisterInt>("plc/set_output_register_int", set_output_register_int_cb);
+  // m_nh_srv_set_output_register_bit = get_node()->create_service<dsr_msgs2::srv::SetOutputRegisterBit>("plc/set_output_register_bit", set_output_register_bit_cb);
+  // m_nh_srv_set_output_register_float = get_node()->create_service<dsr_msgs2::srv::SetOutputRegisterFloat>("plc/set_output_register_float", set_output_register_float_cb);
+  // m_nh_srv_get_output_register_int = get_node()->create_service<dsr_msgs2::srv::GetOutputRegisterInt>("plc/get_output_register_int", get_output_register_int_cb);
+  // m_nh_srv_get_output_register_bit = get_node()->create_service<dsr_msgs2::srv::GetOutputRegisterBit>("plc/get_output_register_bit", get_output_register_bit_cb);
+  // m_nh_srv_get_output_register_float = get_node()->create_service<dsr_msgs2::srv::GetOutputRegisterFloat>("plc/get_output_register_float", get_output_register_float_cb);
+  rclcpp::Service<dsr_msgs2::srv::GetInputRegisterInt>::SharedPtr    m_nh_srv_get_input_register_int;
+  rclcpp::Service<dsr_msgs2::srv::GetInputRegisterBit>::SharedPtr    m_nh_srv_get_input_register_bit;
+  rclcpp::Service<dsr_msgs2::srv::GetInputRegisterFloat>::SharedPtr  m_nh_srv_get_input_register_float;
+  rclcpp::Service<dsr_msgs2::srv::SetOutputRegisterInt>::SharedPtr   m_nh_srv_set_output_register_int;
+  rclcpp::Service<dsr_msgs2::srv::SetOutputRegisterBit>::SharedPtr   m_nh_srv_set_output_register_bit;
+  rclcpp::Service<dsr_msgs2::srv::SetOutputRegisterFloat>::SharedPtr m_nh_srv_set_output_register_float;
+  rclcpp::Service<dsr_msgs2::srv::GetOutputRegisterInt>::SharedPtr   m_nh_srv_get_output_register_int;
+  rclcpp::Service<dsr_msgs2::srv::GetOutputRegisterBit>::SharedPtr   m_nh_srv_get_output_register_bit;
+  rclcpp::Service<dsr_msgs2::srv::GetOutputRegisterFloat>::SharedPtr m_nh_srv_get_output_register_float;
 
   // Real-time data publishing members and parameters for periodic Float32MultiArray topic output.
   bool use_rt_topic_pub_{false};
@@ -741,6 +781,11 @@ protected:
   rclcpp::TimerBase::SharedPtr rt_timer_;
   void publish_read_data_rt_selected();
   static bool extract_field(LPRT_OUTPUT_DATA_LIST temp,const std::string& key,std::vector<float>& out);
+
+  // IO state topic publishing (ctrl-box digital input/output, works in both virtual and real mode).
+  rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr ctrl_io_pub_;
+  rclcpp::TimerBase::SharedPtr ctrl_io_timer_;
+  void publish_ctrl_io_state();
 
 private:
   static constexpr const char* PARAM_USE_RT_TOPIC_PUB = "use_rt_topic_pub";
